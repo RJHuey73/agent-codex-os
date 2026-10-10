@@ -8,6 +8,9 @@
  * G3: live agents are A01–A05 only. A13 is T0-direct and never invocable here.
  * G4: incoming packet trust is capped at VALIDATED (STAGED ≠ ratified).
  * G7: every output carries a server-side ProvenanceBinding.
+ * Floor (T0 ruling `enforce`, 2026-10-10): the packet's trust must meet the
+ *     routed agent's trdec_agents.trust_state_floor, compared by enum rank.
+ *     An unknown or missing floor rejects (fail closed).
  */
 
 export const TIERS = ["T0", "T1", "T2", "T3", "T4", "T5"] as const;
@@ -33,6 +36,17 @@ export type TrustState = (typeof TRUST_ORDER)[number];
 /** Highest incoming packet trust accepted on this path (G4). */
 export const TRUST_CAP: TrustState = "VALIDATED";
 
+/** Rank of a trust state, or -1 when the value is not a known state. */
+export function trustRank(state: unknown): number {
+  return TRUST_ORDER.indexOf(state as TrustState);
+}
+
+/** True when the packet meets the agent's floor. Unknown values never meet it. */
+export function meetsFloor(packet: TrustState, floor: unknown): boolean {
+  const p = trustRank(packet), f = trustRank(floor);
+  return p >= 0 && f >= 0 && p >= f;
+}
+
 export function exceedsTrustCap(claimed: TrustState, cap: TrustState = TRUST_CAP): boolean {
   return TRUST_ORDER.indexOf(claimed) > TRUST_ORDER.indexOf(cap);
 }
@@ -44,7 +58,8 @@ export type RejectReason =
   | "AUTHORITY_CAP_EXCEEDED"
   | "TRUST_CAP_EXCEEDED"
   | "AGENT_OVERRIDE_MISMATCH"
-  | "AGENT_NOT_LIVE";
+  | "AGENT_NOT_LIVE"
+  | "BELOW_AGENT_FLOOR";
 
 export interface CallerClaims {
   authority_tier: number;
@@ -55,13 +70,15 @@ export interface CallerClaims {
 /**
  * Decide whether the caller's claims are acceptable for the routed agent.
  * Returns null when allowed, otherwise the first reject reason.
- * `dbInvocable` is the trdec_agents.invocable flag. Both it and the allowlist must allow the agent.
+ * `dbInvocable` and `dbFloor` come from the routed agent's trdec_agents row.
+ * Both the flag and the allowlist must allow the agent, and the packet must meet the floor.
  */
-export function checkClaims(claims: CallerClaims, routedAgentId: string, dbInvocable: boolean): RejectReason | null {
+export function checkClaims(claims: CallerClaims, routedAgentId: string, dbInvocable: boolean, dbFloor: unknown): RejectReason | null {
   if (exceedsAuthorityCap(claims.authority_tier)) return "AUTHORITY_CAP_EXCEEDED";
   if (exceedsTrustCap(claims.packet_trust_state)) return "TRUST_CAP_EXCEEDED";
   if (claims.requested_agent_id !== undefined && claims.requested_agent_id !== routedAgentId) return "AGENT_OVERRIDE_MISMATCH";
   if (!LIVE_AGENT_ALLOWLIST.includes(routedAgentId) || !dbInvocable) return "AGENT_NOT_LIVE";
+  if (!meetsFloor(claims.packet_trust_state, dbFloor)) return "BELOW_AGENT_FLOOR";
   return null;
 }
 
@@ -72,6 +89,6 @@ export function provenanceBinding(): { source_tier: "sfx-t2"; ratified: false; a
     ratified: false,
     authority_cap: TIERS[AUTHORITY_CAP_TIER]!,
     trust_cap: TRUST_CAP,
-    bound_by: "fn-trdec-invoke v5",
+    bound_by: "fn-trdec-invoke v6",
   };
 }

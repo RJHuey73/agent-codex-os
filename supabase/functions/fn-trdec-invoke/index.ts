@@ -1,5 +1,11 @@
 /**
- * fn-trdec-invoke v5 — Tridecagon invocation
+ * fn-trdec-invoke v6 — Tridecagon invocation
+ * v6 (T0 floor ruling `enforce`, 2026-10-10):
+ *   - Packet trust must meet the routed agent's trdec_agents.trust_state_floor,
+ *     compared by enum rank (policy.ts meetsFloor). Below floor → 403
+ *     BELOW_AGENT_FLOOR before any write; an unknown floor fails closed.
+ *     At the T2/VALIDATED cap only A03 (floor VALIDATED) is reachable.
+ *   - Arbiter's STRUCTURED hard-stop message no longer claims a RATIFIED floor.
  * v5 (GO-4b, T0 2026-10-10; rulings G1=T2, G3=A01–A05 option a):
  *   - G1: claims above T2 authority → 403 (tier rank, T0 highest; see policy.ts).
  *   - G4: packet_trust_state above VALIDATED → 403.
@@ -110,7 +116,7 @@ function isTrustEscalation(before: PacketTrustState, req: PacketTrustState): boo
 
 function runArbiter(req: TrdecInvokeRequest, gov: GovernanceEnvelope, ts: PacketTrustState): AgentOutput {
   if (req.intent === "audit") return { result_status: "HARD_STOP", output_payload: { blocked: true }, trust_state_after: ts, hard_stop_reason: "WITNESS_INVOCATION_ATTEMPT" };
-  if (ts === "STRUCTURED") return { result_status: "HARD_STOP", output_payload: { blocked: true }, trust_state_after: ts, hard_stop_reason: "TRUST_VIOLATION — below RATIFIED floor" };
+  if (ts === "STRUCTURED") return { result_status: "HARD_STOP", output_payload: { blocked: true }, trust_state_after: ts, hard_stop_reason: "TRUST_VIOLATION — STRUCTURED packet rejected" };
   const issues: string[] = [];
   if (gov.authority_tier >= 3 && gov.governance_trust === "TRUSTED") issues.push(`tier=${gov.authority_tier} claims TRUSTED — inconsistent`);
   return { result_status: "SUCCESS", output_payload: { gate_passed: issues.length === 0, issues, governance_summary: { authority_tier: gov.authority_tier, governance_trust: gov.governance_trust, regime: gov.regime, canon_version: gov.canon_version } }, trust_state_after: ts, t1_notes: issues.length > 0 ? `Arbiter flagged: ${issues.join("; ")}` : undefined };
@@ -269,7 +275,7 @@ Deno.serve(async (req: Request) => {
   if (!provided) return json({ error: "Unauthorized — x-sfx-sync-key required" }, 401);
   const { data: keyOk, error: keyErr } = await client.rpc("fn_trdec_invoke_key_matches", { p_key: provided });
   if (keyErr) {
-    console.error(`[fn-trdec-invoke v5] key verifier unavailable: ${keyErr.message}`);
+    console.error(`[fn-trdec-invoke v6] key verifier unavailable: ${keyErr.message}`);
     return json({ error: "Service unavailable" }, 503);
   }
   if (keyOk !== true) return json({ error: "Unauthorized — x-sfx-sync-key required" }, 401);
@@ -294,17 +300,18 @@ Deno.serve(async (req: Request) => {
 
   if (routing.is_witness) return json({ status: "WITNESS_ROUTED", message: "Non-invocable until CANON-318.", routing, governance: { context_id: governance.context_id, canon_version: governance.canon_version } });
 
-  // GO-4b: caller claims are checked against server-side caps before any write.
+  // GO-4b + floor ruling: caller claims and the registry floor are checked before any write.
   const target = routing.agent_id as LiveAgentId;
-  const { data: agentRow, error: agentErr } = await client.from("trdec_agents").select("invocable").eq("agent_id", target).maybeSingle();
+  const { data: agentRow, error: agentErr } = await client.from("trdec_agents").select("invocable, trust_state_floor").eq("agent_id", target).maybeSingle();
   if (agentErr) {
-    console.error(`[fn-trdec-invoke v5] registry lookup failed: ${agentErr.message}`);
+    console.error(`[fn-trdec-invoke v6] registry lookup failed: ${agentErr.message}`);
     return json({ error: "Service unavailable" }, 503);
   }
   const reject: RejectReason | null = checkClaims(
     { authority_tier: governance.authority_tier, packet_trust_state: packet_trust_state as TrustState, requested_agent_id: request.agent_id },
     target,
     agentRow?.invocable === true,
+    agentRow?.trust_state_floor,
   );
   if (reject) {
     console.warn(JSON.stringify({ event: "TRDEC_INVOKE_REJECTED", reason: reject, routed_agent: target, requested_agent: request.agent_id ?? null, claimed_tier: governance.authority_tier, claimed_trust: packet_trust_state, context_id: governance.context_id }));
@@ -322,7 +329,7 @@ Deno.serve(async (req: Request) => {
     const result = await orchestrate(request, target, db);
     return json({ status: result.result_status, invocation_id: result.invocation_id, agent: { id: result.agent_id, cluster_id: result.cluster_id }, routing: { cluster_id: routing.cluster_id, reason: routing.reason }, output: result.output_payload, trust: { before: result.trust_state_before, after: result.trust_state_after }, hard_stop_reason: result.hard_stop_reason ?? null, provenance, governance: { context_id: governance.context_id, authority_tier: governance.authority_tier, governance_trust: governance.governance_trust, regime: governance.regime, canon_version: governance.canon_version, canon_id: governance.canon_id } });
   } catch (err) {
-    console.error("[fn-trdec-invoke v5]", err);
+    console.error("[fn-trdec-invoke v6]", err);
     return json({ error: "orchestration_error" }, 500);
   }
 });

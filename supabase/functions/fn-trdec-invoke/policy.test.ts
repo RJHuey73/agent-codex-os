@@ -6,6 +6,7 @@ import {
   checkClaims,
   exceedsAuthorityCap,
   exceedsTrustCap,
+  meetsFloor,
   provenanceBinding,
   tierRank,
 } from "./policy.ts";
@@ -35,18 +36,32 @@ test("G4: trust is capped at VALIDATED", () => {
 
 test("checkClaims: reject reasons", () => {
   const ok = { authority_tier: 2, packet_trust_state: "VALIDATED" as const };
-  assert.equal(checkClaims(ok, "TRDEC-A01", true), null);
-  assert.equal(checkClaims({ ...ok, authority_tier: 0 }, "TRDEC-A01", true), "AUTHORITY_CAP_EXCEEDED");
-  assert.equal(checkClaims({ ...ok, packet_trust_state: "RATIFIED" }, "TRDEC-A01", true), "TRUST_CAP_EXCEEDED");
-  assert.equal(checkClaims({ ...ok, requested_agent_id: "TRDEC-A02" }, "TRDEC-A01", true), "AGENT_OVERRIDE_MISMATCH");
-  assert.equal(checkClaims({ ...ok, requested_agent_id: "TRDEC-A01" }, "TRDEC-A01", true), null);
-  assert.equal(checkClaims(ok, "TRDEC-A01", false), "AGENT_NOT_LIVE", "DB flag must also allow");
-  assert.equal(checkClaims(ok, "TRDEC-A06", true), "AGENT_NOT_LIVE", "A06–A13 not live");
-  assert.equal(checkClaims(ok, "TRDEC-A13", true), "AGENT_NOT_LIVE", "A13 never invocable here");
+  const F = "VALIDATED";
+  assert.equal(checkClaims(ok, "TRDEC-A03", true, F), null);
+  assert.equal(checkClaims({ ...ok, authority_tier: 0 }, "TRDEC-A03", true, F), "AUTHORITY_CAP_EXCEEDED");
+  assert.equal(checkClaims({ ...ok, packet_trust_state: "RATIFIED" }, "TRDEC-A03", true, F), "TRUST_CAP_EXCEEDED");
+  assert.equal(checkClaims({ ...ok, requested_agent_id: "TRDEC-A02" }, "TRDEC-A03", true, F), "AGENT_OVERRIDE_MISMATCH");
+  assert.equal(checkClaims({ ...ok, requested_agent_id: "TRDEC-A03" }, "TRDEC-A03", true, F), null);
+  assert.equal(checkClaims(ok, "TRDEC-A03", false, F), "AGENT_NOT_LIVE", "DB flag must also allow");
+  assert.equal(checkClaims(ok, "TRDEC-A06", true, F), "AGENT_NOT_LIVE", "A06–A13 not live");
+  assert.equal(checkClaims(ok, "TRDEC-A13", true, F), "AGENT_NOT_LIVE", "A13 never invocable here");
+});
+
+test("floor (enforce): packet trust must meet the registry floor by rank", () => {
+  const ok = { authority_tier: 2, packet_trust_state: "VALIDATED" as const };
+  // Live registry floors: A01/A02/A04 RATIFIED, A03/A05 VALIDATED.
+  for (const a of ["TRDEC-A01", "TRDEC-A02", "TRDEC-A04"]) assert.equal(checkClaims(ok, a, true, "RATIFIED"), "BELOW_AGENT_FLOOR", a);
+  assert.equal(checkClaims(ok, "TRDEC-A03", true, "VALIDATED"), null);
+  assert.equal(checkClaims({ ...ok, packet_trust_state: "STRUCTURED" }, "TRDEC-A03", true, "VALIDATED"), "BELOW_AGENT_FLOOR");
+  // Rank, not string order: "RATIFIED" < "VALIDATED" alphabetically, but ranks above it.
+  assert.equal(meetsFloor("VALIDATED", "RATIFIED"), false);
+  assert.equal(meetsFloor("VALIDATED", "STRUCTURED"), true);
+  // Fail closed on a missing or unknown floor.
+  for (const bad of [undefined, null, "", "validated", "SOVEREIGNTY"]) assert.equal(checkClaims(ok, "TRDEC-A03", true, bad), "BELOW_AGENT_FLOOR", String(bad));
 });
 
 test("G7: provenance binding is fixed server-side", () => {
   assert.deepEqual(provenanceBinding(), {
-    source_tier: "sfx-t2", ratified: false, authority_cap: "T2", trust_cap: "VALIDATED", bound_by: "fn-trdec-invoke v5",
+    source_tier: "sfx-t2", ratified: false, authority_cap: "T2", trust_cap: "VALIDATED", bound_by: "fn-trdec-invoke v6",
   });
 });

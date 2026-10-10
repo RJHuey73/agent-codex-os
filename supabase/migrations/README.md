@@ -1,8 +1,8 @@
 # supabase/migrations
 
 Applied migration history for Supabase project **agent-codex-os**
-(`oufyfdhjjvhrseythgrr`). There are 69 files, from `20260506040747` to `20261010193021`.
-They were pulled 1:1 from `supabase_migrations.schema_migrations` on 2026-10-10 (the last eight were applied that day under T0 GO-2a / GO-P / GO-2b / GO-4a / GO-K / GO-4b):
+(`oufyfdhjjvhrseythgrr`). There are 70 files, from `20260506040747` to `20261010195916`.
+They were pulled 1:1 from `supabase_migrations.schema_migrations` on 2026-10-10 (the last nine were applied that day under T0 GO-2a / GO-P / GO-2b / GO-4a / GO-K / GO-4b / GO-3):
 each file is that row's `statements`, joined in order.
 
 This directory mirrors what is already live. It is not a deploy source.
@@ -66,3 +66,14 @@ immutability trigger keeps them write-once.
   unit-tested in `policy.test.ts`. A claim above T2, trust above VALIDATED, or an
   `agent_id` that differs from the router's choice returns 403 before any write.
   Outputs carry a server-side ProvenanceBinding (`sfx-t2`, `ratified=false`).
+
+## Floor enforcement and sync_key retirement (2026-10-10, `enforce` / GO-3)
+
+- `supabase/functions/fn-trdec-invoke/` v6 (deployed as version 19): the packet's
+  trust must meet the routed agent's `trdec_agents.trust_state_floor`, compared by
+  enum rank; below floor (or an unknown floor) returns 403 `BELOW_AGENT_FLOOR`
+  before any write. At the T2 / VALIDATED cap only A03 and A05 pass the floor
+  check; A05 then hard-stops in its own logic, which requires RATIFIED.
+- `20261010195916`: nulls `sync_key` (the burned key) and `ccx_service_key`. The
+  column DROPs and the removal of `fn_trdec_invoke_db`'s deprecated parameters
+  are pending a separate confirmation of the destructive statements.

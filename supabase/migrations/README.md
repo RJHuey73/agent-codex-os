@@ -1,8 +1,8 @@
 # supabase/migrations
 
 Applied migration history for Supabase project **agent-codex-os**
-(`oufyfdhjjvhrseythgrr`). There are 65 files, from `20260506040747` to `20261010162801`.
-They were pulled 1:1 from `supabase_migrations.schema_migrations` on 2026-10-10 (the last four were applied that day under T0 GO-2a / GO-P / GO-2b):
+(`oufyfdhjjvhrseythgrr`). There are 66 files, from `20260506040747` to `20261010172137`.
+They were pulled 1:1 from `supabase_migrations.schema_migrations` on 2026-10-10 (the last five were applied that day under T0 GO-2a / GO-P / GO-2b / GO-4a):
 each file is that row's `statements`, joined in order.
 
 This directory mirrors what is already live. It is not a deploy source.
@@ -35,3 +35,13 @@ holding a `<…>` placeholder, not a value.
   `fn_sfx_sync_key_matches()` (service_role only).
 - `20261010162801`: cron sends `x-sfx-sync-key` read from Vault at run time.
 - Edge function source: `supabase/functions/fn-canon-sync/index.ts` (v7, fails closed).
+
+## Edge function auth hardening (2026-10-10, GO-4a / GO-4c)
+
+- `20261010172137`: separate Vault key `trdec_invoke_key` and verifier
+  `fn_trdec_invoke_key_matches()` (service_role only). `fn_trdec_invoke_db` now
+  sends `x-sfx-sync-key` from Vault and no longer sends `ccx_service_key` as a Bearer token.
+- `supabase/functions/fn-trdec-invoke/index.ts` (v4, deployed as version 15): checks the
+  key in the database and accepts it only from the `x-sfx-sync-key` header. 500
+  responses no longer return error detail.
+- `supabase/functions/run-agent/index.ts` (deployed as version 31): disabled; returns 410 Gone.

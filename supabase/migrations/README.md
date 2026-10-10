@@ -1,8 +1,8 @@
 # supabase/migrations
 
 Applied migration history for Supabase project **agent-codex-os**
-(`oufyfdhjjvhrseythgrr`). There are 68 files, from `20260506040747` to `20261010191919`.
-They were pulled 1:1 from `supabase_migrations.schema_migrations` on 2026-10-10 (the last seven were applied that day under T0 GO-2a / GO-P / GO-2b / GO-4a / GO-K):
+(`oufyfdhjjvhrseythgrr`). There are 69 files, from `20260506040747` to `20261010193021`.
+They were pulled 1:1 from `supabase_migrations.schema_migrations` on 2026-10-10 (the last eight were applied that day under T0 GO-2a / GO-P / GO-2b / GO-4a / GO-K / GO-4b):
 each file is that row's `statements`, joined in order.
 
 This directory mirrors what is already live. It is not a deploy source.
@@ -54,3 +54,15 @@ Vault (`ccx_service_role_key`) through the dashboard, so it never passed through
 an agent. The old `default` key was then deleted, and a probe now gets 401.
 - `20261010190554`: `fn_ccx_dispatch_pending` reads the key from Vault.
 - `20261010191919`: `sfx_system_config.ccx_service_key` set to NULL and marked deprecated.
+
+## Governance caps on fn-trdec-invoke (2026-10-10, GO-4b)
+
+T0 rulings: G1 authority cap = T2. G3 live agents = A01–A05, enforced by a code
+allowlist (option a). The ratified `trdec_agents` rows are untouched, because an
+immutability trigger keeps them write-once.
+- `20261010193021`: `fn_trdec_invoke_db` sends fixed T2 / VALIDATED / PROD / TRUSTED
+  values and `canon_id` NULL. Its old governance parameters are deprecated and ignored.
+- `supabase/functions/fn-trdec-invoke/` v5 (deployed as version 18), with `policy.ts`
+  unit-tested in `policy.test.ts`. A claim above T2, trust above VALIDATED, or an
+  `agent_id` that differs from the router's choice returns 403 before any write.
+  Outputs carry a server-side ProvenanceBinding (`sfx-t2`, `ratified=false`).

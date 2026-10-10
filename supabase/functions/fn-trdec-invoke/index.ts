@@ -1,5 +1,15 @@
 /**
- * fn-trdec-invoke v4 — Tridecagon invocation
+ * fn-trdec-invoke v5 — Tridecagon invocation
+ * v5 (GO-4b, T0 2026-10-10; rulings G1=T2, G3=A01–A05 option a):
+ *   - G1: claims above T2 authority → 403 (tier rank, T0 highest; see policy.ts).
+ *   - G4: packet_trust_state above VALIDATED → 403.
+ *   - G2: an agent_id that differs from the router's choice → 403 (no override).
+ *   - G3: routed agent must be in the A01–A05 allowlist AND trdec_agents.invocable.
+ *   - G5: canon_id may be null (fn_trdec_invoke_db no longer invents one).
+ *   - G7: server-side ProvenanceBinding (sfx-t2, ratified=false) on every output.
+ *   - Rejections return 403 and emit a structured TRDEC_INVOKE_REJECTED log event
+ *     before any write. dry_run=true returns the decision and writes nothing.
+ *   - G6 (registry ACTIVE/can_execute) deferred: no TRDEC→registry mapping exists.
  * v4 (GO-4a, T0 2026-10-10) — auth hardening only, invocation logic unchanged:
  *   - Key is the per-function Vault secret `trdec_invoke_key`, verified in-DB by
  *     public.fn_trdec_invoke_key_matches() (service_role only, hash compare).
@@ -7,13 +17,12 @@
  *   - Only the x-sfx-sync-key header is accepted (no Authorization/Bearer).
  *   - Fails closed: missing header or mismatch => 401; verifier error => 503.
  *   - 500 responses no longer echo internal error text (`detail`).
- * Known, not addressed here (GO-4b): governance envelope is caller-asserted and
- * an explicit agent_id overrides the router.
  * v3 lineage: SFX-SESSION-20260611 Phase 2 | CANON-304/305/306
  */
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { checkClaims, provenanceBinding, type RejectReason, type TrustState } from "./policy.ts";
 
 export type GovernanceTrust = "TRUSTED" | "SANDBOXED" | "UNTRUSTED";
 export type PacketTrustState = "STRUCTURED" | "VALIDATED" | "RATIFIED" | "SOVEREIGN";
@@ -23,7 +32,7 @@ export type Regime = "PROD" | "SANDBOX" | "DEV";
 export interface GovernanceEnvelope {
   context_id: string; binding_id: string; authority_tier: AuthorityTier;
   regime: Regime; governance_trust: GovernanceTrust; canon_version: string;
-  canon_id: string; labels?: Record<string, unknown>;
+  canon_id: string | null; labels?: Record<string, unknown>;
 }
 
 export type LiveAgentId = "TRDEC-A01" | "TRDEC-A02" | "TRDEC-A03" | "TRDEC-A04" | "TRDEC-A05";
@@ -211,7 +220,7 @@ async function orchestrate(request: TrdecInvokeRequest, routing_agent_id: LiveAg
     ? (out.hard_stop_reason?.includes("WITNESS") ? "WITNESS_INVOCATION_ATTEMPT" : out.hard_stop_reason?.includes("TRUST") ? "TRUST_VIOLATION" : out.hard_stop_reason?.includes("CLUSTER") ? "CLUSTER_VIOLATION" : "CONSTRAINT_VIOLATION")
     : "NORMAL_INVOCATION";
 
-  const state_delta: Record<string, unknown> = { trust_state_before: ts_before, trust_state_after: ts_after, result_status: out.result_status, canon_version: gov.canon_version, canon_id: gov.canon_id, authority_tier: gov.authority_tier, governance_trust: gov.governance_trust };
+  const state_delta: Record<string, unknown> = { provenance_binding: provenanceBinding(), trust_state_before: ts_before, trust_state_after: ts_after, result_status: out.result_status, canon_version: gov.canon_version, canon_id: gov.canon_id, authority_tier: gov.authority_tier, governance_trust: gov.governance_trust };
   if (out.anomalies?.length) state_delta.anomalies = out.anomalies;
   if (out.scores) state_delta.scores = out.scores;
 
@@ -241,8 +250,9 @@ function parseGovernance(raw: Record<string, unknown>): GovernanceEnvelope | { e
   if (!["TRUSTED","SANDBOXED","UNTRUSTED"].includes(raw.governance_trust as string)) return { error: "governance.governance_trust: TRUSTED|SANDBOXED|UNTRUSTED" };
   if (!["PROD","SANDBOX","DEV"].includes(raw.regime as string)) return { error: "governance.regime: PROD|SANDBOX|DEV" };
   if (!raw.canon_version || typeof raw.canon_version !== "string") return { error: "governance.canon_version required" };
-  if (!raw.canon_id || typeof raw.canon_id !== "string") return { error: "governance.canon_id required" };
-  return { context_id: raw.context_id, binding_id: raw.binding_id, authority_tier: raw.authority_tier as AuthorityTier, governance_trust: raw.governance_trust as GovernanceTrust, regime: raw.regime as Regime, canon_version: raw.canon_version, canon_id: raw.canon_id, labels: raw.labels as Record<string, unknown> | undefined };
+  if (raw.canon_id !== undefined && raw.canon_id !== null && typeof raw.canon_id !== "string") return { error: "governance.canon_id must be a string or null" };
+  if (!Number.isInteger(raw.authority_tier)) return { error: "governance.authority_tier must be an integer" };
+  return { context_id: raw.context_id, binding_id: raw.binding_id, authority_tier: raw.authority_tier as AuthorityTier, governance_trust: raw.governance_trust as GovernanceTrust, regime: raw.regime as Regime, canon_version: raw.canon_version, canon_id: (raw.canon_id as string | null | undefined) ?? null, labels: raw.labels as Record<string, unknown> | undefined };
 }
 
 Deno.serve(async (req: Request) => {
@@ -259,7 +269,7 @@ Deno.serve(async (req: Request) => {
   if (!provided) return json({ error: "Unauthorized — x-sfx-sync-key required" }, 401);
   const { data: keyOk, error: keyErr } = await client.rpc("fn_trdec_invoke_key_matches", { p_key: provided });
   if (keyErr) {
-    console.error(`[fn-trdec-invoke v4] key verifier unavailable: ${keyErr.message}`);
+    console.error(`[fn-trdec-invoke v5] key verifier unavailable: ${keyErr.message}`);
     return json({ error: "Service unavailable" }, 503);
   }
   if (keyOk !== true) return json({ error: "Unauthorized — x-sfx-sync-key required" }, 401);
@@ -284,14 +294,35 @@ Deno.serve(async (req: Request) => {
 
   if (routing.is_witness) return json({ status: "WITNESS_ROUTED", message: "Non-invocable until CANON-318.", routing, governance: { context_id: governance.context_id, canon_version: governance.canon_version } });
 
-  const target = (request.agent_id ?? routing.agent_id) as LiveAgentId;
+  // GO-4b: caller claims are checked against server-side caps before any write.
+  const target = routing.agent_id as LiveAgentId;
+  const { data: agentRow, error: agentErr } = await client.from("trdec_agents").select("invocable").eq("agent_id", target).maybeSingle();
+  if (agentErr) {
+    console.error(`[fn-trdec-invoke v5] registry lookup failed: ${agentErr.message}`);
+    return json({ error: "Service unavailable" }, 503);
+  }
+  const reject: RejectReason | null = checkClaims(
+    { authority_tier: governance.authority_tier, packet_trust_state: packet_trust_state as TrustState, requested_agent_id: request.agent_id },
+    target,
+    agentRow?.invocable === true,
+  );
+  if (reject) {
+    console.warn(JSON.stringify({ event: "TRDEC_INVOKE_REJECTED", reason: reject, routed_agent: target, requested_agent: request.agent_id ?? null, claimed_tier: governance.authority_tier, claimed_trust: packet_trust_state, context_id: governance.context_id }));
+    return json({ error: "Forbidden", reason: reject, routing: { cluster_id: routing.cluster_id, agent_id: target } }, 403);
+  }
+
+  const provenance = provenanceBinding();
+  if (body.dry_run === true) {
+    return json({ status: "DRY_RUN", routing: { cluster_id: routing.cluster_id, agent_id: target, reason: routing.reason }, provenance, governance: { context_id: governance.context_id, authority_tier: governance.authority_tier, canon_id: governance.canon_id } });
+  }
+
   const db = makeDB(client);
 
   try {
     const result = await orchestrate(request, target, db);
-    return json({ status: result.result_status, invocation_id: result.invocation_id, agent: { id: result.agent_id, cluster_id: result.cluster_id }, routing: { cluster_id: routing.cluster_id, reason: routing.reason }, output: result.output_payload, trust: { before: result.trust_state_before, after: result.trust_state_after }, hard_stop_reason: result.hard_stop_reason ?? null, governance: { context_id: governance.context_id, authority_tier: governance.authority_tier, governance_trust: governance.governance_trust, regime: governance.regime, canon_version: governance.canon_version, canon_id: governance.canon_id } });
+    return json({ status: result.result_status, invocation_id: result.invocation_id, agent: { id: result.agent_id, cluster_id: result.cluster_id }, routing: { cluster_id: routing.cluster_id, reason: routing.reason }, output: result.output_payload, trust: { before: result.trust_state_before, after: result.trust_state_after }, hard_stop_reason: result.hard_stop_reason ?? null, provenance, governance: { context_id: governance.context_id, authority_tier: governance.authority_tier, governance_trust: governance.governance_trust, regime: governance.regime, canon_version: governance.canon_version, canon_id: governance.canon_id } });
   } catch (err) {
-    console.error("[fn-trdec-invoke v4]", err);
+    console.error("[fn-trdec-invoke v5]", err);
     return json({ error: "orchestration_error" }, 500);
   }
 });

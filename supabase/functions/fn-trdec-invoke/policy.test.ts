@@ -6,6 +6,7 @@ import {
   checkClaims,
   exceedsAuthorityCap,
   exceedsTrustCap,
+  effectiveFloor,
   meetsFloor,
   provenanceBinding,
   tierRank,
@@ -60,8 +61,21 @@ test("floor (enforce): packet trust must meet the registry floor by rank", () =>
   for (const bad of [undefined, null, "", "validated", "SOVEREIGNTY"]) assert.equal(checkClaims(ok, "TRDEC-A03", true, bad), "BELOW_AGENT_FLOOR", String(bad));
 });
 
+test("A05 code reject: Liaison needs RATIFIED even though its registry floor is VALIDATED", () => {
+  const ok = { authority_tier: 2, packet_trust_state: "VALIDATED" as const };
+  assert.equal(effectiveFloor("TRDEC-A05", "VALIDATED"), "RATIFIED");
+  assert.equal(checkClaims(ok, "TRDEC-A05", true, "VALIDATED"), "BELOW_AGENT_FLOOR");
+  // The code floor only raises, never lowers, and never repairs an unknown registry value.
+  assert.equal(effectiveFloor("TRDEC-A05", "SOVEREIGN"), "SOVEREIGN");
+  assert.equal(effectiveFloor("TRDEC-A05", "bogus"), "bogus");
+  assert.equal(checkClaims(ok, "TRDEC-A05", true, undefined), "BELOW_AGENT_FLOOR");
+  // Other agents are unaffected.
+  assert.equal(effectiveFloor("TRDEC-A03", "VALIDATED"), "VALIDATED");
+  assert.equal(checkClaims(ok, "TRDEC-A03", true, "VALIDATED"), null);
+});
+
 test("G7: provenance binding is fixed server-side", () => {
   assert.deepEqual(provenanceBinding(), {
-    source_tier: "sfx-t2", ratified: false, authority_cap: "T2", trust_cap: "VALIDATED", bound_by: "fn-trdec-invoke v6",
+    source_tier: "sfx-t2", ratified: false, authority_cap: "T2", trust_cap: "VALIDATED", bound_by: "fn-trdec-invoke v7",
   });
 });

@@ -11,6 +11,10 @@
  * Floor (T0 ruling `enforce`, 2026-10-10): the packet's trust must meet the
  *     routed agent's trdec_agents.trust_state_floor, compared by enum rank.
  *     An unknown or missing floor rejects (fail closed).
+ * A05 code reject (T0 2026-10-10): an agent whose own logic requires more trust
+ *     than its registry floor gets a code-level floor too. The effective floor is
+ *     the higher of the two, so the request is refused before any write instead of
+ *     hard-stopping inside the agent after packets are persisted.
  */
 
 export const TIERS = ["T0", "T1", "T2", "T3", "T4", "T5"] as const;
@@ -47,6 +51,20 @@ export function meetsFloor(packet: TrustState, floor: unknown): boolean {
   return p >= 0 && f >= 0 && p >= f;
 }
 
+/**
+ * Code-level floors for agents whose runtime logic demands more than the
+ * ratified registry floor. The registry rows are write-once, so this is where
+ * the stricter requirement lives. A05 (Liaison) hard-stops below RATIFIED.
+ */
+export const CODE_TRUST_FLOOR: Readonly<Record<string, TrustState>> = { "TRDEC-A05": "RATIFIED" };
+
+/** The higher of the registry floor and any code-level floor; unknown registry values stay unknown. */
+export function effectiveFloor(routedAgentId: string, dbFloor: unknown): unknown {
+  const code = CODE_TRUST_FLOOR[routedAgentId];
+  if (code === undefined || trustRank(dbFloor) < 0) return dbFloor;
+  return trustRank(code) > trustRank(dbFloor) ? code : dbFloor;
+}
+
 export function exceedsTrustCap(claimed: TrustState, cap: TrustState = TRUST_CAP): boolean {
   return TRUST_ORDER.indexOf(claimed) > TRUST_ORDER.indexOf(cap);
 }
@@ -78,7 +96,7 @@ export function checkClaims(claims: CallerClaims, routedAgentId: string, dbInvoc
   if (exceedsTrustCap(claims.packet_trust_state)) return "TRUST_CAP_EXCEEDED";
   if (claims.requested_agent_id !== undefined && claims.requested_agent_id !== routedAgentId) return "AGENT_OVERRIDE_MISMATCH";
   if (!LIVE_AGENT_ALLOWLIST.includes(routedAgentId) || !dbInvocable) return "AGENT_NOT_LIVE";
-  if (!meetsFloor(claims.packet_trust_state, dbFloor)) return "BELOW_AGENT_FLOOR";
+  if (!meetsFloor(claims.packet_trust_state, effectiveFloor(routedAgentId, dbFloor))) return "BELOW_AGENT_FLOOR";
   return null;
 }
 
@@ -89,6 +107,6 @@ export function provenanceBinding(): { source_tier: "sfx-t2"; ratified: false; a
     ratified: false,
     authority_cap: TIERS[AUTHORITY_CAP_TIER]!,
     trust_cap: TRUST_CAP,
-    bound_by: "fn-trdec-invoke v6",
+    bound_by: "fn-trdec-invoke v7",
   };
 }

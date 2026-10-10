@@ -1,5 +1,9 @@
 /**
- * fn-trdec-invoke v6 — Tridecagon invocation
+ * fn-trdec-invoke v7 — Tridecagon invocation
+ * v7 (T0 A05 ruling `code reject`, 2026-10-10):
+ *   - policy.ts CODE_TRUST_FLOOR raises A05 (Liaison) to RATIFIED, matching its own
+ *     runtime check, so A05 is refused with 403 BELOW_AGENT_FLOOR before any write
+ *     instead of persisting a HARD_STOP row. The registry rows stay untouched.
  * v6 (T0 floor ruling `enforce`, 2026-10-10):
  *   - Packet trust must meet the routed agent's trdec_agents.trust_state_floor,
  *     compared by enum rank (policy.ts meetsFloor). Below floor → 403
@@ -275,7 +279,7 @@ Deno.serve(async (req: Request) => {
   if (!provided) return json({ error: "Unauthorized — x-sfx-sync-key required" }, 401);
   const { data: keyOk, error: keyErr } = await client.rpc("fn_trdec_invoke_key_matches", { p_key: provided });
   if (keyErr) {
-    console.error(`[fn-trdec-invoke v6] key verifier unavailable: ${keyErr.message}`);
+    console.error(`[fn-trdec-invoke v7] key verifier unavailable: ${keyErr.message}`);
     return json({ error: "Service unavailable" }, 503);
   }
   if (keyOk !== true) return json({ error: "Unauthorized — x-sfx-sync-key required" }, 401);
@@ -300,11 +304,11 @@ Deno.serve(async (req: Request) => {
 
   if (routing.is_witness) return json({ status: "WITNESS_ROUTED", message: "Non-invocable until CANON-318.", routing, governance: { context_id: governance.context_id, canon_version: governance.canon_version } });
 
-  // GO-4b + floor ruling: caller claims and the registry floor are checked before any write.
+  // GO-4b + floor rulings: caller claims and the effective floor are checked before any write.
   const target = routing.agent_id as LiveAgentId;
   const { data: agentRow, error: agentErr } = await client.from("trdec_agents").select("invocable, trust_state_floor").eq("agent_id", target).maybeSingle();
   if (agentErr) {
-    console.error(`[fn-trdec-invoke v6] registry lookup failed: ${agentErr.message}`);
+    console.error(`[fn-trdec-invoke v7] registry lookup failed: ${agentErr.message}`);
     return json({ error: "Service unavailable" }, 503);
   }
   const reject: RejectReason | null = checkClaims(
@@ -329,7 +333,7 @@ Deno.serve(async (req: Request) => {
     const result = await orchestrate(request, target, db);
     return json({ status: result.result_status, invocation_id: result.invocation_id, agent: { id: result.agent_id, cluster_id: result.cluster_id }, routing: { cluster_id: routing.cluster_id, reason: routing.reason }, output: result.output_payload, trust: { before: result.trust_state_before, after: result.trust_state_after }, hard_stop_reason: result.hard_stop_reason ?? null, provenance, governance: { context_id: governance.context_id, authority_tier: governance.authority_tier, governance_trust: governance.governance_trust, regime: governance.regime, canon_version: governance.canon_version, canon_id: governance.canon_id } });
   } catch (err) {
-    console.error("[fn-trdec-invoke v6]", err);
+    console.error("[fn-trdec-invoke v7]", err);
     return json({ error: "orchestration_error" }, 500);
   }
 });

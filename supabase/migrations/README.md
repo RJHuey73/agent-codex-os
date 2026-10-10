@@ -72,8 +72,17 @@ immutability trigger keeps them write-once.
 - `supabase/functions/fn-trdec-invoke/` v6 (deployed as version 19): the packet's
   trust must meet the routed agent's `trdec_agents.trust_state_floor`, compared by
   enum rank; below floor (or an unknown floor) returns 403 `BELOW_AGENT_FLOOR`
-  before any write. At the T2 / VALIDATED cap only A03 and A05 pass the floor
-  check; A05 then hard-stops in its own logic, which requires RATIFIED.
+  before any write.
+- `fn-trdec-invoke` v7 (deployed as version 20, T0 A05 ruling `code reject`): a
+  code-level floor raises A05 (Liaison) to RATIFIED, matching its own runtime
+  check, so it is refused before any write. At the T2 / VALIDATED cap only A03
+  is reachable.
+- GO-test (2026-10-10): one real A03 call, `regime=SANDBOX`, context
+  `GO-TEST-20261010-A03`, payload tagged `test: true`. Wrote exactly the expected
+  rows (2 packets, 1 invocation, 1 provenance event, 1 agent state, 0
+  transitions): SUCCESS, VALIDATED → VALIDATED, `canon_id` NULL, provenance
+  `sfx-t2` / `ratified=false` / `bound_by: fn-trdec-invoke v7`. The rows are
+  append-only and permanent.
 - `20261010195916`: nulls `sync_key` (the burned key) and `ccx_service_key`. The
   column DROPs and the removal of `fn_trdec_invoke_db`'s deprecated parameters
   are pending a separate confirmation of the destructive statements.

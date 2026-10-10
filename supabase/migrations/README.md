@@ -1,8 +1,8 @@
 # supabase/migrations
 
 Applied migration history for Supabase project **agent-codex-os**
-(`oufyfdhjjvhrseythgrr`). There are 61 files, from `20260506040747` to `20260804145200`.
-They were pulled 1:1 from `supabase_migrations.schema_migrations` on 2026-10-10:
+(`oufyfdhjjvhrseythgrr`). There are 65 files, from `20260506040747` to `20261010162801`.
+They were pulled 1:1 from `supabase_migrations.schema_migrations` on 2026-10-10 (the last four were applied that day under T0 GO-2a / GO-P / GO-2b):
 each file is that row's `statements`, joined in order.
 
 This directory mirrors what is already live. It is not a deploy source.
@@ -25,3 +25,13 @@ The secret scan (detect-secrets 1.x plus targeted patterns for JWTs, `sb_*`
 keys, `sk-`, `AIza`, `gh*_`, bearer literals, credentialed URLs and quoted
 key assignments) found nothing else. The `ccx_service_key` lines are comments
 holding a `<…>` placeholder, not a value.
+
+## Sync-key remediation (2026-10-10)
+
+- `20261010162622`: anon/authenticated can no longer read `sfx_system_config.sync_key`.
+  That value is burned and is not used anywhere.
+- `20261010162642`: `canon-sync-pull` cron **paused** (Airtable 429 billing limit).
+- `20261010162723`: fresh key generated in-DB into Vault (`sfx_sync_key`), plus
+  `fn_sfx_sync_key_matches()` (service_role only).
+- `20261010162801`: cron sends `x-sfx-sync-key` read from Vault at run time.
+- Edge function source: `supabase/functions/fn-canon-sync/index.ts` (v7, fails closed).

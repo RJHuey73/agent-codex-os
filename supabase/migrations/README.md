@@ -1,8 +1,8 @@
 # supabase/migrations
 
 Applied migration history for Supabase project **agent-codex-os**
-(`oufyfdhjjvhrseythgrr`). There are 66 files, from `20260506040747` to `20261010172137`.
-They were pulled 1:1 from `supabase_migrations.schema_migrations` on 2026-10-10 (the last five were applied that day under T0 GO-2a / GO-P / GO-2b / GO-4a):
+(`oufyfdhjjvhrseythgrr`). There are 68 files, from `20260506040747` to `20261010191919`.
+They were pulled 1:1 from `supabase_migrations.schema_migrations` on 2026-10-10 (the last seven were applied that day under T0 GO-2a / GO-P / GO-2b / GO-4a / GO-K):
 each file is that row's `statements`, joined in order.
 
 This directory mirrors what is already live. It is not a deploy source.
@@ -45,3 +45,12 @@ holding a `<…>` placeholder, not a value.
   key in the database and accepts it only from the `x-sfx-sync-key` header. 500
   responses no longer return error detail.
 - `supabase/functions/run-agent/index.ts` (deployed as version 31): disabled; returns 410 Gone.
+
+## Service key rotation (2026-10-10, GO-K)
+
+The fn-ccx-ingest secret key was readable by anon until 2026-07-12 and had not
+been rotated. T0 created a new secret key (`ccx_ingest_dispatch`) and set it in
+Vault (`ccx_service_role_key`) through the dashboard, so it never passed through
+an agent. The old `default` key was then deleted, and a probe now gets 401.
+- `20261010190554`: `fn_ccx_dispatch_pending` reads the key from Vault.
+- `20261010191919`: `sfx_system_config.ccx_service_key` set to NULL and marked deprecated.

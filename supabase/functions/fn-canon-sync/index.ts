@@ -119,7 +119,7 @@ Deno.serve(async (req: Request) => {
   } catch (e) {
     if (e instanceof AirtableRateLimitError) {
       console.error("[fn-canon-sync v7] Airtable 429 — breaker open for this run, writing nothing");
-      const headers = { ...CORS, "Content-Type": "application/json" };
+      const headers: Record<string, string> = { ...CORS, "Content-Type": "application/json" };
       if (e.retryAfter) headers["Retry-After"] = e.retryAfter;
       return new Response(JSON.stringify({ error: "Airtable rate-limited" }), { status: 429, headers });
     }

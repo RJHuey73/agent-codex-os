@@ -1,6 +1,6 @@
 # Agent class mapping (CANON-210) — status and G6 draft
 
-Status: draft for review. Not ratified. Nothing here writes to Canon or to the database.
+Status: decisions recorded and registry rows written as STAGED. Not ratified. Ratification to ACTIVE needs a T0 action.
 
 ## 1. The "5→9 class map" is closed, not mapped
 
@@ -25,33 +25,30 @@ Canon references in this doc, as cited by CANON-378 and the registry (read from 
 - CANON-210 Governed Agent Classes
 - CANON-211 Constitutional Workflow Suite (`sfx_workflow_templates`, `sfx_canon_drafts`)
 
-## 2. G6 — TRDEC agents → `sfx_agent_registry`
+## 2. G6 — TRDEC agents → `sfx_agent_registry` (decided)
 
-Established rules (already ratified or recorded):
+Established rules:
 
-1. **Canonical agent id is `A01`–`A13`.** `TRDEC-A01` is a derived CCX view (ADR-0013, ruling 1). The `TRDEC-` prefix is applied only at the CCX persistence boundary.
-2. **Trust ladder** is SOVEREIGN / RATIFIED / PROVISIONAL / UNTRUSTED (CANON-204). PROVISIONAL is the floor for A03 and A05 (ADR-0013, ruling 2).
-3. **WITNESS is non-invocable** and has no executor.
+1. Canonical agent id is `A01`–`A13`. `TRDEC-` is applied only at the CCX boundary (ADR-0013, ruling 1).
+2. Trust ladder: SOVEREIGN / RATIFIED / PROVISIONAL / UNTRUSTED (CANON-204). PROVISIONAL floor for A03 and A05 (ADR-0013, ruling 2).
+3. WITNESS is non-invocable and has no executor.
 
-Current facts from the manifests (`tridecagon-agents/agents/*/*.manifest.json`):
+Decisions (T0, 2026-11-05):
 
-| Manifest class | Agents | Trust state | Invocable |
+| Agent(s) | CANON-210 class | Tier | Basis |
 |---|---|---|---|
-| CORE | A01–A05 | A01, A02, A04 RATIFIED; A03, A05 PROVISIONAL | yes |
-| HARMONIC | A06–A12 | RATIFIED | yes |
-| HARMONIC | A13 | SOVEREIGN | yes |
-| WITNESS | TRDEC-WITNESS | SOVEREIGN | no |
+| TRDEC-WITNESS | SOVEREIGN | 0 | T0 decision; `can_execute = false` (non-invocable) |
+| A13 | ARCHITECT | 1 | T0 decision (overrides its SOVEREIGN trust state) |
+| A01–A05 (CORE) | EXECUTOR | 3 | Group decision |
+| A06–A12 (HARMONIC) | ADVISORY | 2 | Group decision; advisory output needs T1 triage |
 
-**Not established:** which CANON-210 class each TRDEC agent takes. The manifests carry CORE / HARMONIC / WITNESS, which is a Tridecagon grouping, not a CANON-210 class. Mapping each agent to a class is a decision, not a derivation.
+Registration (written to `public.sfx_agent_registry` plus linked rows in `public.agents`):
+- 14 rows, all `sfx_status = STAGED`. None can write Canon or ratify.
+- `trust_ceiling` 0.500 and `trust_floor` 0.000 (table defaults; no per-tier values are established).
+- `escalation_path` and `sfx_governed` left at defaults. Not decided.
+- 9 pre-existing ACTIVE rows (T0:russ, T1:claude, four T2 agents, AUTO:001A, SYS:p5, SYS:p6) were not changed.
 
-`sfx_agent_registry` has 0 rows in the agent-codex-os project. Its column list was not checked in this pass.
-
-### Decision needed (per agent, pick one per row)
-
-| Agent | Option A | Option B |
-|---|---|---|
-| TRDEC-WITNESS | SOVEREIGN (matches SOVEREIGN/T0 tier) | leave unregistered (non-invocable) |
-| A13 (SOVEREIGN trust) | SOVEREIGN | ARCHITECT |
-| A01–A12 | one class per CORE/HARMONIC group | per-agent |
-
-Proposed default if no decision is given: register WITNESS as SOVEREIGN, leave all other agents unregistered until assigned. This does not invent a class for any agent.
+Open:
+- Moving the 14 rows to ACTIVE needs a T0 action.
+- Escalation paths and trust ceilings per agent need decisions before ratification.
+- CANON-207 and CANON-209 full text was not verified.

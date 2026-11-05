@@ -110,6 +110,21 @@ Deno.serve(async (req: Request) => {
   }
   if (keyOk !== true) return json({ error: "Unauthorized" }, 401);
 
+  // Persistent breaker: while blocked, do not call Airtable at all.
+  // Read failure fails closed (no Airtable call).
+  const { data: breaker, error: breakerErr } = await ccx
+    .from("sfx_canon_sync_breaker").select("blocked_until").eq("id", 1).single();
+  if (breakerErr) {
+    console.error(`[fn-canon-sync v8] breaker read failed — not calling Airtable: ${breakerErr.message}`);
+    return json({ error: "Service unavailable" }, 503);
+  }
+  const blockedUntil = breaker?.blocked_until ? Date.parse(breaker.blocked_until) : 0;
+  if (blockedUntil > Date.now()) {
+    const headers: Record<string, string> = { ...CORS, "Content-Type": "application/json" };
+    headers["Retry-After"] = String(Math.ceil((blockedUntil - Date.now()) / 1000));
+    return new Response(JSON.stringify({ error: "Airtable breaker open" }), { status: 429, headers });
+  }
+
   const pat = Deno.env.get("SFX_AIRTABLE_PAT");
   if (!pat) return json({ error: "SFX_AIRTABLE_PAT not set — cannot reach SoT" }, 500);
 
@@ -118,9 +133,15 @@ Deno.serve(async (req: Request) => {
     rows = await pullRegistry(pat);
   } catch (e) {
     if (e instanceof AirtableRateLimitError) {
-      console.error("[fn-canon-sync v7] Airtable 429 — breaker open for this run, writing nothing");
+      const seconds = Math.max(1, parseInt(e.retryAfter ?? "", 10) || 3600);
+      const until = new Date(Date.now() + seconds * 1000).toISOString();
+      const { error: setErr } = await ccx.from("sfx_canon_sync_breaker")
+        .update({ blocked_until: until, last_429_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq("id", 1);
+      if (setErr) console.error(`[fn-canon-sync v8] could not persist breaker: ${setErr.message}`);
+      console.error(`[fn-canon-sync v8] Airtable 429 — breaker open until ${until}, writing nothing`);
       const headers: Record<string, string> = { ...CORS, "Content-Type": "application/json" };
-      if (e.retryAfter) headers["Retry-After"] = e.retryAfter;
+      headers["Retry-After"] = String(seconds);
       return new Response(JSON.stringify({ error: "Airtable rate-limited" }), { status: 429, headers });
     }
     console.error(`[fn-canon-sync v7] Airtable pull FAILED — writing nothing: ${e}`);

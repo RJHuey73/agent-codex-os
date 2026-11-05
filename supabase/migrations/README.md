@@ -86,3 +86,8 @@ immutability trigger keeps them write-once.
 - `20261010195916`: nulls `sync_key` (the burned key) and `ccx_service_key`. The
   column DROPs and the removal of `fn_trdec_invoke_db`'s deprecated parameters
   are pending a separate confirmation of the destructive statements.
+
+## Canon-sync breaker and cadence (2026-11-05, T0 GO)
+
+- `20261105070000`: persistent Airtable 429 breaker (`sfx_canon_sync_breaker`, service_role only) and hourly `canon-sync-pull` (`0 * * * *`).
+- `20261105113321`: `canon-sync-pull` pg_net timeout 15 s → 30 s. A cold start at 10:00Z took ~15.3 s: the function returned 200 and synced, but pg_net recorded `timed_out`.

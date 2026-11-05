@@ -45,6 +45,15 @@ function parseSuffix(canonId: string): number | null {
 
 interface RegistryRow { canonId: string; version: string | null; status: string | null; suffix: number; }
 
+// Thrown on Airtable HTTP 429. The breaker is per invocation: one 429 aborts
+// the run with no retry and no write, so a billing or quota cap cannot be
+// hammered by repeated pulls. Cross-run backoff is not implemented here.
+class AirtableRateLimitError extends Error {
+  constructor(public retryAfter: string | null) {
+    super("Airtable rate limit (429)");
+  }
+}
+
 async function pullRegistry(pat: string): Promise<RegistryRow[]> {
   const rows: RegistryRow[] = [];
   let offset: string | undefined;
@@ -57,6 +66,9 @@ async function pullRegistry(pat: string): Promise<RegistryRow[]> {
     if (offset) url.searchParams.set("offset", offset);
 
     const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${pat}` } });
+    if (res.status === 429) {
+      throw new AirtableRateLimitError(res.headers.get("Retry-After"));
+    }
     if (!res.ok) throw new Error(`Airtable ${res.status}: ${await res.text()}`);
     const data = await res.json();
 
@@ -105,6 +117,12 @@ Deno.serve(async (req: Request) => {
   try {
     rows = await pullRegistry(pat);
   } catch (e) {
+    if (e instanceof AirtableRateLimitError) {
+      console.error("[fn-canon-sync v7] Airtable 429 — breaker open for this run, writing nothing");
+      const headers = { ...CORS, "Content-Type": "application/json" };
+      if (e.retryAfter) headers["Retry-After"] = e.retryAfter;
+      return new Response(JSON.stringify({ error: "Airtable rate-limited" }), { status: 429, headers });
+    }
     console.error(`[fn-canon-sync v7] Airtable pull FAILED — writing nothing: ${e}`);
     return json({ error: "Airtable SoT read failed" }, 502);
   }
